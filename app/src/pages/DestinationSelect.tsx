@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
-import { Search, X, MapPin, Navigation, Train } from 'lucide-react';
+import { Search, X, MapPin, Navigation, Train, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -83,14 +83,6 @@ function MapClickHandler({ onMapClick }: { onMapClick: (latlng: LatLng) => void 
   return null;
 }
 
-const mockSearchResults: SearchResult[] = [
-  { id: '1', name: 'Estacao Paulista', address: 'Av. Paulista, 1578 - Bela Vista, Sao Paulo', location: { lat: -23.5617, lng: -46.656 } },
-  { id: '2', name: 'Metro Se', address: 'Pca da Se, s/n - Centro, Sao Paulo', location: { lat: -23.5503, lng: -46.6339 } },
-  { id: '3', name: 'Terminal Bandeira', address: 'Pca Fernando Costa, s/n - Centro, Sao Paulo', location: { lat: -23.5478, lng: -46.638 } },
-  { id: '4', name: 'Estacao Bras', address: 'R. Domingos de Morais, 238 - Vila Mariana, Sao Paulo', location: { lat: -23.5445, lng: -46.6237 } },
-  { id: '5', name: 'Metro Consolacao', address: 'R. da Consolacao, 2365 - Consolacao, Sao Paulo', location: { lat: -23.5576, lng: -46.6609 } },
-];
-
 export default function DestinationSelect() {
   const navigate = useNavigate();
   const { setDestination } = useAlarmContext();
@@ -98,12 +90,14 @@ export default function DestinationSelect() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [selectedDestination, setSelectedDestination] = useState<Destination | null>(null);
   const [mapCenter, setMapCenter] = useState<LatLng>(
     latitude && longitude ? { lat: latitude, lng: longitude } : defaultLocation
   );
   const [showBottomSheet, setShowBottomSheet] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const isSelectingRef = useRef(false);
 
   const userLocation = latitude && longitude ? { lat: latitude, lng: longitude } : null;
 
@@ -113,18 +107,61 @@ export default function DestinationSelect() {
     }
   }, [userLocation?.lat, userLocation?.lng]);
 
+  // Busca de endereços em tempo real usando a API gratuita Nominatim (OpenStreetMap)
+  useEffect(() => {
+    if (isSelectingRef.current) {
+      isSelectingRef.current = false;
+      return;
+    }
+
+    if (searchQuery.trim().length < 3) {
+      setSearchResults([]);
+      return;
+    }
+
+    const delayDebounce = setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            searchQuery
+          )}&limit=5&addressdetails=1`,
+          {
+            headers: {
+              'User-Agent': 'WakeMeUp-LocationAlarm-App',
+            },
+          }
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const results: SearchResult[] = data.map((item: any) => {
+            const address = item.address || {};
+            // Determina um nome legível baseado nos dados de endereço retornados
+            const name = address.amenity || address.railway || address.bus_stop || address.road || address.suburb || address.city || item.display_name.split(',')[0];
+            return {
+              id: item.place_id.toString(),
+              name: name,
+              address: item.display_name,
+              location: {
+                lat: parseFloat(item.lat),
+                lng: parseFloat(item.lon),
+              },
+            };
+          });
+          setSearchResults(results);
+        }
+      } catch (err) {
+        console.error('Erro ao buscar endereço:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 600); // Aguarda 600ms de inatividade para evitar requisições desnecessárias
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchQuery]);
+
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
-    if (query.trim().length > 0) {
-      const filtered = mockSearchResults.filter(
-        (r) =>
-          r.name.toLowerCase().includes(query.toLowerCase()) ||
-          r.address.toLowerCase().includes(query.toLowerCase())
-      );
-      setSearchResults(filtered);
-    } else {
-      setSearchResults([]);
-    }
   }, []);
 
   const handleSelectResult = useCallback((result: SearchResult) => {
@@ -134,6 +171,7 @@ export default function DestinationSelect() {
       address: result.address,
       location: result.location,
     };
+    isSelectingRef.current = true;
     setSelectedDestination(dest);
     setMapCenter(result.location);
     setSearchQuery(result.name);
@@ -206,11 +244,15 @@ export default function DestinationSelect() {
         transition={{ duration: 0.3, delay: 0.1 }}
       >
         <div className="flex items-center gap-3 bg-app-card rounded-xl px-4 py-3 shadow-lg border border-app-border">
-          <Search className="w-5 h-5 text-app-text-secondary flex-shrink-0" />
+          {isLoading ? (
+            <Loader2 className="w-5 h-5 text-app-accent animate-spin flex-shrink-0" />
+          ) : (
+            <Search className="w-5 h-5 text-app-text-secondary flex-shrink-0" />
+          )}
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Buscar parada de onibus ou estacao..."
+            placeholder="Buscar endereço ou parada..."
             className="flex-1 bg-transparent text-white text-base outline-none placeholder:text-app-text-secondary"
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
