@@ -1,40 +1,68 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Target, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Circle, Polyline } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import 'leaflet-defaulticon-compatibility';
+import { ArrowLeft, Radar, BellRing, BellOff, MapPin } from 'lucide-react';
+import { Map, AdvancedMarker, useMap, ColorScheme } from '@vis.gl/react-google-maps';
 import { useAlarmContext } from '../contexts/AlarmContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { formatDistance, calculateDistance } from '../utils/distance';
 import { useGeolocation } from '../hooks/useGeolocation';
 
-const destinationIcon = new L.DivIcon({
-  className: 'custom-dest-marker-travel',
-  html: `<div style="width:36px;height:44px;background:linear-gradient(135deg,#E8A93F,#F0BC5E);border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);animation:float 1.5s ease-in-out infinite;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(45deg)"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.5-5.7c-.1-.4-.2-.8-.2-1.2 0-.4-.1-.8-.2-1.2L18 3"/><path d="M2 12V8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4"/></svg></div>`,
-  iconSize: [36, 44],
-  iconAnchor: [18, 44],
-});
+function MapCircle({ center, radius, color = '#E8A93F' }: { center: google.maps.LatLngLiteral, radius: number, color?: string }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map) return;
+    const circle = new google.maps.Circle({
+      strokeColor: color,
+      strokeOpacity: 0.8,
+      strokeWeight: 2,
+      fillColor: color,
+      fillOpacity: 0.08,
+      map,
+      center,
+      radius
+    });
+    return () => circle.setMap(null);
+  }, [map, center, radius, color]);
+  return null;
+}
 
-const userIcon = new L.DivIcon({
-  className: 'user-location-dot',
-  html: `<div style="position:relative;width:40px;height:40px;">
-    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border-radius:50%;border:2px solid rgba(229,57,53,0.3);animation:pulse-ring 2s linear infinite;"></div>
-    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#E53935;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:2;"></div>
-  </div>`,
-  iconSize: [40, 40],
-  iconAnchor: [20, 20],
-});
+function MapPolyline({ path, color = '#E8A93F' }: { path: google.maps.LatLngLiteral[], color?: string }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map) return;
+    
+    const lineSymbol = {
+      path: 'M 0,-1 0,1',
+      strokeOpacity: 1,
+      scale: 2
+    };
+
+    const polyline = new google.maps.Polyline({
+      path,
+      strokeColor: color,
+      strokeOpacity: 0,
+      strokeWeight: 2,
+      icons: [{
+        icon: lineSymbol,
+        offset: '0',
+        repeat: '12px'
+      }],
+      map
+    });
+
+    return () => polyline.setMap(null);
+  }, [map, path, color]);
+  return null;
+}
 
 export default function TravelMode() {
   const navigate = useNavigate();
   const { config, cancelAlarm, setUserLocation, distance } = useAlarmContext();
+  const { theme } = useTheme();
   const { latitude, longitude } = useGeolocation((loc) => setUserLocation(loc));
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [initialDistance, setInitialDistance] = useState<number | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
 
   useEffect(() => {
     if (!config) {
@@ -68,11 +96,8 @@ export default function TravelMode() {
 
   if (!config) return null;
 
-  const pathPositions: [number, number][] = userLocation
-    ? [
-        [userLocation.lat, userLocation.lng],
-        [config.destination.location.lat, config.destination.location.lng],
-      ]
+  const pathPositions = userLocation
+    ? [userLocation, config.destination.location]
     : [];
 
   return (
@@ -90,7 +115,7 @@ export default function TravelMode() {
           onClick={handleCancel}
           className="pointer-events-auto mt-3 ml-3 w-10 h-10 bg-app-card/80 backdrop-blur rounded-full flex items-center justify-center border border-app-border"
         >
-          <ArrowLeft className="w-5 h-5 text-white" />
+          <ArrowLeft className="w-5 h-5 text-app-text-primary" />
         </button>
       </div>
 
@@ -98,48 +123,41 @@ export default function TravelMode() {
         <div className="w-3 h-3 rounded-full bg-app-success animate-pulse-dot shadow-lg shadow-app-success/50" />
       </div>
 
-      <MapContainer
-        center={[config.destination.location.lat, config.destination.location.lng]}
-        zoom={13}
-        className="h-full w-full"
-        zoomControl={false}
-        attributionControl={false}
-        ref={mapRef}
+      <Map
+        defaultZoom={13}
+        center={config.destination.location}
+        mapId="DEMO_MAP_ID"
+        colorScheme={theme === 'dark' ? ColorScheme.DARK : ColorScheme.LIGHT}
+        disableDefaultUI={true}
+        gestureHandling="greedy"
+        style={{ width: '100%', height: '100%' }}
       >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; CARTO'
-        />
-        <Marker
-          position={[config.destination.location.lat, config.destination.location.lng]}
-          icon={destinationIcon}
-        />
-        <Circle
-          center={[config.destination.location.lat, config.destination.location.lng]}
-          radius={config.radius}
-          pathOptions={{
-            color: '#E8A93F',
-            fillColor: '#E8A93F',
-            fillOpacity: 0.08,
-            weight: 2,
-            dashArray: '6, 6',
-          }}
-        />
+        <AdvancedMarker position={config.destination.location}>
+          <div style={{
+             width: '36px', height: '36px', background: 'linear-gradient(135deg, #E8A93F, #F0BC5E)',
+             borderRadius: '50% 50% 50% 0', transform: 'rotate(-45deg)', display: 'flex',
+             alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+             animation: 'float 1.5s ease-in-out infinite', position: 'relative', top: '-22px'
+          }}>
+            <MapPin size={16} color="white" style={{ transform: 'rotate(45deg)' }} />
+          </div>
+        </AdvancedMarker>
+
+        <MapCircle center={config.destination.location} radius={config.radius} color="#E8A93F" />
+
         {userLocation && (
           <>
-            <Marker position={[userLocation.lat, userLocation.lng]} icon={userIcon} />
-            <Polyline
-              positions={pathPositions}
-              pathOptions={{
-                color: '#E8A93F',
-                weight: 2,
-                opacity: 0.4,
-                dashArray: '8, 8',
-              }}
-            />
+            <AdvancedMarker position={userLocation}>
+              <div style={{ position: 'relative', width: '40px', height: '40px' }}>
+                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40px', height: '40px', borderRadius: '50%', border: '2px solid rgba(229, 57, 53, 0.3)', animation: 'pulse-ring 2s linear infinite' }} />
+                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '14px', height: '14px', borderRadius: '50%', background: '#E53935', border: '2px solid white', boxShadow: '0 1px 4px rgba(0,0,0,0.3)', zIndex: 2 }} />
+              </div>
+            </AdvancedMarker>
+            
+            <MapPolyline path={pathPositions} color="#E8A93F" />
           </>
         )}
-      </MapContainer>
+      </Map>
 
       <motion.div
         className="absolute bottom-28 left-4 right-4 z-[1000]"
@@ -151,7 +169,7 @@ export default function TravelMode() {
           <p className="text-app-text-secondary text-sm uppercase tracking-widest text-center mb-1">
             Distancia restante
           </p>
-          <p className="text-white font-bold text-5xl text-center tabular-nums mb-3">
+          <p className="text-app-text-primary font-bold text-5xl text-center tabular-nums mb-3">
             {distance !== null ? formatDistance(distance) : '---'}
           </p>
 
@@ -169,11 +187,11 @@ export default function TravelMode() {
 
           <div className="flex items-center justify-between text-sm">
             <div className="flex items-center gap-2 text-app-text-secondary">
-              <Target className="w-4 h-4" />
+              <Radar className="w-4 h-4" />
               <span>Raio: {formatDistance(config.radius)}</span>
             </div>
             <div className="flex items-center gap-2 text-app-success">
-              <ShieldCheck className="w-4 h-4" />
+              <BellRing className="w-4 h-4" />
               <span>Ativo</span>
             </div>
           </div>
@@ -209,10 +227,10 @@ export default function TravelMode() {
             >
               <div className="flex justify-center mb-4">
                 <div className="w-14 h-14 rounded-full bg-app-warning/20 flex items-center justify-center">
-                  <AlertTriangle className="w-7 h-7 text-app-warning" />
+                  <BellOff className="w-7 h-7 text-app-warning" />
                 </div>
               </div>
-              <h3 className="text-white font-semibold text-xl text-center mb-2">
+              <h3 className="text-app-text-primary font-semibold text-xl text-center mb-2">
                 Cancelar Viagem?
               </h3>
               <p className="text-app-text-secondary text-base text-center mb-6">
@@ -221,7 +239,7 @@ export default function TravelMode() {
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowCancelModal(false)}
-                  className="flex-1 h-12 rounded-xl bg-app-border text-white font-semibold active:scale-[0.97] transition-transform"
+                  className="flex-1 h-12 rounded-xl bg-app-border text-app-text-primary font-semibold active:scale-[0.97] transition-transform"
                 >
                   Voltar
                 </button>

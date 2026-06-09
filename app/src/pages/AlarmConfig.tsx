@@ -1,22 +1,12 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Volume2, Vibrate } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Circle } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import 'leaflet-defaulticon-compatibility';
+import { ArrowLeft, Bell, Smartphone, MapPin } from 'lucide-react';
+import { Map, AdvancedMarker, useMap, ColorScheme } from '@vis.gl/react-google-maps';
+import { useEffect, useMemo } from 'react';
 import { useAlarmContext } from '../contexts/AlarmContext';
+import { useTheme } from '../contexts/ThemeContext';
 import { formatDistance, calculateDistance } from '../utils/distance';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { useMemo } from 'react';
-
-const destinationIcon = new L.DivIcon({
-  className: 'custom-dest-marker',
-  html: `<div style="width:36px;height:44px;background:linear-gradient(135deg,#E8A93F,#F0BC5E);border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(45deg)"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.5-5.7c-.1-.4-.2-.8-.2-1.2 0-.4-.1-.8-.2-1.2L18 3"/><path d="M2 12V8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4"/></svg></div>`,
-  iconSize: [36, 44],
-  iconAnchor: [18, 44],
-});
 
 const RADIUS_OPTIONS = [
   { value: 100, label: '100m' },
@@ -26,9 +16,29 @@ const RADIUS_OPTIONS = [
   { value: 2000, label: '2km' },
 ];
 
+function MapCircle({ center, radius, color = '#E8A93F' }: { center: google.maps.LatLngLiteral, radius: number, color?: string }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map) return;
+    const circle = new google.maps.Circle({
+      strokeColor: color,
+      strokeOpacity: 0.8,
+      strokeWeight: 2,
+      fillColor: color,
+      fillOpacity: 0.1,
+      map,
+      center,
+      radius
+    });
+    return () => circle.setMap(null);
+  }, [map, center, radius, color]);
+  return null;
+}
+
 export default function AlarmConfig() {
   const navigate = useNavigate();
   const { config, setRadius, setSoundEnabled, setVibrationEnabled, startMonitoring } = useAlarmContext();
+  const { theme } = useTheme();
   const { latitude, longitude } = useGeolocation();
 
   if (!config) {
@@ -62,62 +72,48 @@ export default function AlarmConfig() {
           onClick={() => navigate('/')}
           className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-app-card transition-colors"
         >
-          <ArrowLeft className="w-5 h-5 text-white" />
+          <ArrowLeft className="w-5 h-5 text-app-text-primary" />
         </button>
-        <h1 className="absolute left-0 right-0 text-center text-white font-semibold text-lg pointer-events-none">
+        <h1 className="absolute left-0 right-0 text-center text-app-text-primary font-semibold text-lg pointer-events-none">
           Configurar Alarme
         </h1>
       </div>
 
       <div className="h-[35%] flex-shrink-0 relative">
-        <MapContainer
-          center={[config.destination.location.lat, config.destination.location.lng]}
-          zoom={14}
-          className="h-full w-full"
-          zoomControl={false}
-          attributionControl={false}
-          dragging={false}
-          scrollWheelZoom={false}
-          doubleClickZoom={false}
+        <Map
+          defaultZoom={14}
+          center={config.destination.location}
+          mapId="DEMO_MAP_ID"
+          colorScheme={theme === 'dark' ? ColorScheme.DARK : ColorScheme.LIGHT}
+          disableDefaultUI={true}
+          gestureHandling="none"
         >
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; CARTO'
-          />
-          <Marker
-            position={[config.destination.location.lat, config.destination.location.lng]}
-            icon={destinationIcon}
-          />
-          <Circle
-            center={[config.destination.location.lat, config.destination.location.lng]}
-            radius={config.radius}
-            pathOptions={{
-              color: '#E8A93F',
-              fillColor: '#E8A93F',
-              fillOpacity: 0.1,
-              weight: 2,
-              dashArray: '6, 6',
-            }}
-          />
+          <AdvancedMarker position={config.destination.location}>
+             <div style={{
+               width: '36px', height: '36px', background: 'linear-gradient(135deg, #E8A93F, #F0BC5E)',
+               borderRadius: '50% 50% 50% 0', transform: 'rotate(-45deg)', display: 'flex',
+               alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+               position: 'relative', top: '-22px'
+             }}>
+               <MapPin size={16} color="white" style={{ transform: 'rotate(45deg)' }} />
+             </div>
+          </AdvancedMarker>
+
+          <MapCircle center={config.destination.location} radius={config.radius} color="#E8A93F" />
+
           {userLocation && (
-            <Marker
-              position={[userLocation.lat, userLocation.lng]}
-              icon={new L.DivIcon({
-                className: 'user-loc-dot',
-                html: `<div style="width:12px;height:12px;border-radius:50%;background:#E53935;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>`,
-                iconSize: [12, 12],
-                iconAnchor: [6, 6],
-              })}
-            />
+            <AdvancedMarker position={userLocation}>
+              <div style={{width: '12px', height: '12px', borderRadius: '50%', background: '#E53935', border: '2px solid white', boxShadow: '0 1px 4px rgba(0,0,0,0.3)'}} />
+            </AdvancedMarker>
           )}
-        </MapContainer>
+        </Map>
 
         <div className="absolute bottom-3 right-3 flex flex-col gap-2">
           <div className="w-8 h-8 bg-app-card/90 rounded-lg flex items-center justify-center border border-app-border">
-            <span className="text-white text-xs font-bold">+</span>
+            <span className="text-app-text-primary text-xs font-bold">+</span>
           </div>
           <div className="w-8 h-8 bg-app-card/90 rounded-lg flex items-center justify-center border border-app-border">
-            <span className="text-white text-xs font-bold">-</span>
+            <span className="text-app-text-primary text-xs font-bold">-</span>
           </div>
         </div>
       </div>
@@ -142,7 +138,7 @@ export default function AlarmConfig() {
           </div>
 
           <div className="bg-app-card rounded-2xl p-5 border border-app-border">
-            <h2 className="text-white font-semibold text-base mb-1">Raio de Alerta</h2>
+            <h2 className="text-app-text-primary font-semibold text-base mb-1">Raio de Alerta</h2>
             <p className="text-app-text-secondary text-sm mb-4">
               Quao longe do destino voce quer ser alertado?
             </p>
@@ -153,7 +149,7 @@ export default function AlarmConfig() {
                   onClick={() => setRadius(option.value)}
                   className={`flex-shrink-0 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                     config.radius === option.value
-                      ? 'bg-app-accent text-white shadow-lg shadow-app-accent/25'
+                      ? 'bg-app-accent text-app-text-primary shadow-lg shadow-app-accent/25'
                       : 'bg-transparent border border-app-border text-app-text-secondary hover:border-app-accent/50'
                   }`}
                 >
@@ -164,12 +160,12 @@ export default function AlarmConfig() {
           </div>
 
           <div className="bg-app-card rounded-2xl p-5 border border-app-border space-y-4">
-            <h2 className="text-white font-semibold text-base">Alerta</h2>
+            <h2 className="text-app-text-primary font-semibold text-base">Alerta</h2>
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <Volume2 className="w-6 h-6 text-app-text-secondary" />
-                <span className="text-white text-base">Som de Alarme</span>
+                <Bell className="w-6 h-6 text-app-text-secondary" />
+                <span className="text-app-text-primary text-base">Som de Alarme</span>
               </div>
               <button
                 onClick={() => setSoundEnabled(!config.soundEnabled)}
@@ -189,8 +185,8 @@ export default function AlarmConfig() {
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <Vibrate className="w-6 h-6 text-app-text-secondary" />
-                <span className="text-white text-base">Vibracao</span>
+                <Smartphone className="w-6 h-6 text-app-text-secondary" />
+                <span className="text-app-text-primary text-base">Vibracao</span>
               </div>
               <button
                 onClick={() => setVibrationEnabled(!config.vibrationEnabled)}

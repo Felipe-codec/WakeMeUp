@@ -1,92 +1,20 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
-import { Search, X, MapPin, Navigation, Train, Loader2 } from 'lucide-react';
+import { Map, AdvancedMarker, useMapsLibrary, ColorScheme } from '@vis.gl/react-google-maps';
+import { Search, X, MapPin, LocateFixed, MapPinned, Loader2, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import 'leaflet-defaulticon-compatibility';
 import { useAlarmContext } from '../contexts/AlarmContext';
 import { useGeolocation } from '../hooks/useGeolocation';
 import type { Destination, LatLng, SearchResult } from '../types';
+import { useTheme } from '../contexts/ThemeContext';
 
 const defaultLocation: LatLng = { lat: -23.5505, lng: -46.6333 };
-
-const destinationIcon = new L.DivIcon({
-  className: 'custom-destination-marker',
-  html: `<div style="
-    width: 40px; 
-    height: 48px; 
-    background: linear-gradient(135deg, #E8A93F, #F0BC5E);
-    border-radius: 50% 50% 50% 0;
-    transform: rotate(-45deg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  ">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg);">
-      <path d="M8 6v6"/>
-      <path d="M15 6v6"/>
-      <path d="M2 12h19.6"/>
-      <path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.5-5.7c-.1-.4-.2-.8-.2-1.2 0-.4-.1-.8-.2-1.2L18 3"/>
-      <path d="M2 12V8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4"/>
-    </svg>
-  </div>`,
-  iconSize: [40, 48],
-  iconAnchor: [20, 48],
-});
-
-const pulseIcon = new L.DivIcon({
-  className: 'custom-location-marker',
-  html: `<div style="position: relative; width: 40px; height: 40px;">
-    <div style="
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 40px; height: 40px;
-      border-radius: 50%;
-      border: 2px solid rgba(229, 57, 53, 0.3);
-      animation: pulse-ring 2s linear infinite;
-    "></div>
-    <div style="
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 12px; height: 12px;
-      border-radius: 50%;
-      background: #E53935;
-      border: 2px solid white;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-      z-index: 2;
-    "></div>
-  </div>`,
-  iconSize: [40, 40],
-  iconAnchor: [20, 20],
-});
-
-function MapController({ center }: { center: LatLng }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView([center.lat, center.lng], map.getZoom() || 15);
-  }, [center, map]);
-  return null;
-}
-
-function MapClickHandler({ onMapClick }: { onMapClick: (latlng: LatLng) => void }) {
-  useMapEvents({
-    click(e) {
-      onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
-    },
-  });
-  return null;
-}
 
 export default function DestinationSelect() {
   const navigate = useNavigate();
   const { setDestination } = useAlarmContext();
   const { latitude, longitude, error: geoError } = useGeolocation();
+  const { theme, toggleTheme } = useTheme();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -107,7 +35,18 @@ export default function DestinationSelect() {
     }
   }, [userLocation?.lat, userLocation?.lng]);
 
-  // Busca de endereços em tempo real usando a API gratuita Nominatim (OpenStreetMap)
+  const placesLib = useMapsLibrary('places');
+  const [autocompleteService, setAutocompleteService] = useState<google.maps.places.AutocompleteService | null>(null);
+  const [placesService, setPlacesService] = useState<google.maps.places.PlacesService | null>(null);
+
+  useEffect(() => {
+    if (!placesLib) return;
+    setAutocompleteService(new placesLib.AutocompleteService());
+    // Create a dummy div to initialize PlacesService
+    setPlacesService(new placesLib.PlacesService(document.createElement('div')));
+  }, [placesLib]);
+
+  // Busca de endereços usando o Google Places API
   useEffect(() => {
     if (isSelectingRef.current) {
       isSelectingRef.current = false;
@@ -119,76 +58,87 @@ export default function DestinationSelect() {
       return;
     }
 
-    const delayDebounce = setTimeout(async () => {
+    if (!autocompleteService) return;
+
+    const delayDebounce = setTimeout(() => {
       setIsLoading(true);
-      try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-            searchQuery
-          )}&limit=5&addressdetails=1`,
-          {
-            headers: {
-              'User-Agent': 'WakeMeUp-LocationAlarm-App',
-            },
+      autocompleteService.getPlacePredictions(
+        { input: searchQuery, componentRestrictions: { country: 'br' } },
+        (predictions: any, status: any) => {
+          if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+            const results: SearchResult[] = predictions.map((p: google.maps.places.AutocompletePrediction) => ({
+              id: p.place_id,
+              name: p.structured_formatting.main_text,
+              address: p.structured_formatting.secondary_text,
+              location: { lat: 0, lng: 0 }, // Serão preenchidos ao selecionar
+            }));
+            setSearchResults(results);
+          } else {
+            setSearchResults([]);
           }
-        );
-        if (response.ok) {
-          const data = await response.json();
-          const results: SearchResult[] = data.map((item: any) => {
-            const address = item.address || {};
-            // Determina um nome legível baseado nos dados de endereço retornados
-            const name = address.amenity || address.railway || address.bus_stop || address.road || address.suburb || address.city || item.display_name.split(',')[0];
-            return {
-              id: item.place_id.toString(),
-              name: name,
-              address: item.display_name,
-              location: {
-                lat: parseFloat(item.lat),
-                lng: parseFloat(item.lon),
-              },
-            };
-          });
-          setSearchResults(results);
+          setIsLoading(false);
         }
-      } catch (err) {
-        console.error('Erro ao buscar endereço:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 600); // Aguarda 600ms de inatividade para evitar requisições desnecessárias
+      );
+    }, 400); // Aguarda 400ms de inatividade
 
     return () => clearTimeout(delayDebounce);
-  }, [searchQuery]);
+  }, [searchQuery, autocompleteService]);
 
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
   }, []);
 
-  const handleSelectResult = useCallback((result: SearchResult) => {
-    const dest: Destination = {
-      id: result.id,
-      name: result.name,
-      address: result.address,
-      location: result.location,
-    };
-    isSelectingRef.current = true;
-    setSelectedDestination(dest);
-    setMapCenter(result.location);
-    setSearchQuery(result.name);
-    setSearchResults([]);
-    setShowBottomSheet(true);
-  }, []);
+  const handleSelectResult = useCallback(
+    (result: SearchResult) => {
+      if (!placesService) return;
+      setIsLoading(true);
+      
+      placesService.getDetails(
+        { placeId: result.id, fields: ['geometry', 'formatted_address', 'name'] },
+        (place, status) => {
+          setIsLoading(false);
+          if (status === google.maps.places.PlacesServiceStatus.OK && place && place.geometry && place.geometry.location) {
+            const loc = place.geometry.location;
+            const dest: Destination = {
+              id: result.id,
+              name: place.name || result.name,
+              address: place.formatted_address || result.address,
+              location: { lat: loc.lat(), lng: loc.lng() },
+            };
+            isSelectingRef.current = true;
+            setSelectedDestination(dest);
+            setMapCenter(dest.location);
+            setSearchQuery(dest.name);
+            setSearchResults([]);
+            setShowBottomSheet(true);
+          } else {
+            console.error("Falha ao obter detalhes do local:", status);
+            alert("Não foi possível carregar os detalhes desse local.");
+          }
+        }
+      );
+    },
+    [placesService]
+  );
 
-  const handleMapClick = useCallback((latlng: LatLng) => {
-    const dest: Destination = {
-      id: `map-${Date.now()}`,
-      name: 'Local selecionado',
-      address: `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`,
-      location: latlng,
-    };
-    setSelectedDestination(dest);
-    setShowBottomSheet(true);
-  }, []);
+  const handleMapClick = useCallback(
+    (e: any) => {
+      if (!e.detail.latLng) return;
+      const lat = e.detail.latLng.lat;
+      const lng = e.detail.latLng.lng;
+      
+      const dest: Destination = {
+        id: `map-${Date.now()}`,
+        name: 'Local selecionado no mapa',
+        address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+        location: { lat, lng },
+      };
+
+      setSelectedDestination(dest);
+      setShowBottomSheet(true);
+    },
+    []
+  );
 
   const handleSetDestination = useCallback(() => {
     if (selectedDestination) {
@@ -211,39 +161,85 @@ export default function DestinationSelect() {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <MapContainer
-        center={[mapCenter.lat, mapCenter.lng]}
-        zoom={15}
-        className="h-full w-full"
-        zoomControl={false}
-        attributionControl={false}
-      >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        />
-        <MapController center={mapCenter} />
-        <MapClickHandler onMapClick={handleMapClick} />
+      <div className="h-full w-full absolute inset-0">
+        <Map
+          defaultZoom={15}
+          center={mapCenter}
+          onCenterChanged={(e) => setMapCenter(e.detail.center)}
+          onClick={handleMapClick}
+          mapId="DEMO_MAP_ID"
+          colorScheme={theme === 'dark' ? ColorScheme.DARK : ColorScheme.LIGHT}
+          disableDefaultUI={true}
+          gestureHandling="greedy"
+          style={{ width: '100%', height: '100%' }}
+        >
+          {userLocation && (
+            <AdvancedMarker position={userLocation}>
+              <div style={{ position: 'relative', width: '40px', height: '40px' }}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    border: '2px solid rgba(229, 57, 53, 0.3)',
+                    animation: 'pulse-ring 2s linear infinite',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '12px',
+                    height: '12px',
+                    borderRadius: '50%',
+                    background: '#E53935',
+                    border: '2px solid white',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                    zIndex: 2,
+                  }}
+                />
+              </div>
+            </AdvancedMarker>
+          )}
 
-        {userLocation && (
-          <Marker position={[userLocation.lat, userLocation.lng]} icon={pulseIcon} />
-        )}
+          {selectedDestination && (
+            <AdvancedMarker position={selectedDestination.location}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  background: 'linear-gradient(135deg, #E8A93F, #F0BC5E)',
+                  borderRadius: '50% 50% 50% 0',
+                  transform: 'rotate(-45deg)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  position: 'relative',
+                  top: '-24px', // Ajuste para centralizar o ponto do pino
+                }}
+              >
+                <MapPin size={20} color="white" style={{ transform: 'rotate(45deg)' }} />
+              </div>
+            </AdvancedMarker>
+          )}
+        </Map>
+      </div>
 
-        {selectedDestination && (
-          <Marker
-            position={[selectedDestination.location.lat, selectedDestination.location.lng]}
-            icon={destinationIcon}
-          />
-        )}
-      </MapContainer>
-
-      <motion.div
-        className="absolute top-4 left-4 right-4 z-[1000]"
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.3, delay: 0.1 }}
-      >
-        <div className="flex items-center gap-3 bg-app-card rounded-xl px-4 py-3 shadow-lg border border-app-border">
+      <div className="absolute top-4 left-4 right-4 z-[1000]">
+        <motion.div
+          className="flex gap-2"
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+        >
+        <div className="flex-1 flex items-center gap-3 bg-app-card rounded-xl px-4 py-3 shadow-lg border border-app-border">
           {isLoading ? (
             <Loader2 className="w-5 h-5 text-app-accent animate-spin flex-shrink-0" />
           ) : (
@@ -253,7 +249,7 @@ export default function DestinationSelect() {
             ref={searchInputRef}
             type="text"
             placeholder="Buscar endereço ou parada..."
-            className="flex-1 bg-transparent text-white text-base outline-none placeholder:text-app-text-secondary"
+            className="flex-1 bg-transparent text-app-text-primary text-base outline-none placeholder:text-app-text-secondary"
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
           />
@@ -263,8 +259,20 @@ export default function DestinationSelect() {
             </button>
           )}
         </div>
+        
+        <button
+          onClick={toggleTheme}
+          className="w-12 flex-shrink-0 bg-app-card rounded-xl shadow-lg border border-app-border flex items-center justify-center hover:bg-app-accent/10 transition-colors"
+        >
+          {theme === 'dark' ? (
+            <Sun className="w-5 h-5 text-app-accent" />
+          ) : (
+            <Moon className="w-5 h-5 text-app-text-primary" />
+          )}
+        </button>
+        </motion.div>
 
-        <AnimatePresence>
+      <AnimatePresence>
           {searchResults.length > 0 && (
             <motion.div
               className="mt-2 bg-app-card rounded-xl shadow-lg border border-app-border max-h-[300px] overflow-y-auto no-scrollbar"
@@ -281,7 +289,7 @@ export default function DestinationSelect() {
                 >
                   <MapPin className="w-5 h-5 text-app-accent mt-0.5 flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-white font-medium text-[15px] truncate">{result.name}</p>
+                    <p className="text-app-text-primary font-medium text-[15px] truncate">{result.name}</p>
                     <p className="text-app-text-secondary text-[13px] truncate">{result.address}</p>
                   </div>
                 </button>
@@ -289,7 +297,7 @@ export default function DestinationSelect() {
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
+      </div>
 
       {geoError && (
         <motion.div
@@ -302,14 +310,14 @@ export default function DestinationSelect() {
       )}
 
       <motion.button
-        className="absolute bottom-28 right-4 z-[1000] w-12 h-12 bg-app-card rounded-full shadow-lg border border-app-border flex items-center justify-center"
+        className={`absolute right-4 z-[1001] w-12 h-12 bg-app-card rounded-full shadow-lg border border-app-border flex items-center justify-center transition-all duration-300 ${showBottomSheet ? 'bottom-60' : 'bottom-28'}`}
         onClick={handleMyLocation}
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
         whileTap={{ scale: 0.92 }}
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
       >
-        <Navigation className="w-5 h-5 text-app-accent" />
+        <LocateFixed className="w-5 h-5 text-app-accent" />
       </motion.button>
 
       <AnimatePresence>
@@ -325,10 +333,10 @@ export default function DestinationSelect() {
             <div className="px-5 pb-6">
               <div className="flex items-start gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-app-accent/15 flex items-center justify-center flex-shrink-0">
-                  <Train className="w-5 h-5 text-app-accent" />
+                  <MapPinned className="w-5 h-5 text-app-accent" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-white font-semibold text-lg truncate">{selectedDestination.name}</h3>
+                  <h3 className="text-app-text-primary font-semibold text-lg truncate">{selectedDestination.name}</h3>
                   <p className="text-app-text-secondary text-sm truncate">{selectedDestination.address}</p>
                 </div>
               </div>

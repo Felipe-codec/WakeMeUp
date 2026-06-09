@@ -32,6 +32,34 @@
     --sidebar-accent-foreground: 0 0% 100%;
     --sidebar-border: 0 0% 20%;
     --sidebar-ring: 37 78% 57%;
+    --sidebar-ring: 37 78% 57%;
+
+    /* App custom theme colors */
+    --app-bg: #121212;
+    --app-card: #1E1E1E;
+    --app-border: #333333;
+    --app-accent: #E8A93F;
+    --app-accent-hover: #F0BC5E;
+    --app-danger: #E85D3F;
+    --app-success: #4CAF50;
+    --app-warning: #E8A93F;
+    --app-text-primary: #FFFFFF;
+    --app-text-secondary: #A0A0A0;
+  }
+
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --app-bg: #F8F9FA;
+    --app-card: #FFFFFF;
+    --app-border: #E5E7EB;
+    --app-accent: #E8A93F;
+    --app-accent-hover: #F0BC5E;
+    --app-danger: #DC2626;
+    --app-success: #16A34A;
+    --app-warning: #D97706;
+    --app-text-primary: #111827;
+    --app-text-secondary: #6B7280;
   }
 }
 
@@ -41,8 +69,8 @@
   }
   html, body, #root {
     @apply h-full w-full overflow-hidden;
-    background-color: #121212;
-    color: #FFFFFF;
+    background-color: var(--app-bg);
+    color: var(--app-text-primary);
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

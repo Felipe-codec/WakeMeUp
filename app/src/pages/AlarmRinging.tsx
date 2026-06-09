@@ -45,7 +45,7 @@ export default function AlarmRinging() {
         </motion.div>
 
         <motion.h1
-          className="text-white font-bold text-4xl text-center mb-2"
+          className="text-app-text-primary font-bold text-4xl text-center mb-2"
           style={{ textShadow: '0 2px 12px rgba(0,0,0,0.5)' }}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
